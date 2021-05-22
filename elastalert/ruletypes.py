@@ -1030,7 +1030,15 @@ class MetricAggregationRule(BaseAggregationRule):
     def __init__(self, *args):
         super(MetricAggregationRule, self).__init__(*args)
         self.ts_field = self.rules.get('timestamp_field', '@timestamp')
-        if 'max_threshold' not in self.rules and 'min_threshold' not in self.rules:
+
+        threshold_keys = [x for x in self.rules
+                          if (x.endswith('_threshold') and x not in ['min_threshold','max_threshold'])
+                          ]
+        thresholds = [(x[:-10], self.rules.get(x)[1:], self.rules.get(x)[:1]) for x in threshold_keys]
+        self.thresholds_above = sorted([(x[0], int(x[1]),) for x in thresholds if x[2] == '>'], key=lambda tup: tup[1])
+        self.thresholds_below = sorted([(x[0], int(x[1]),) for x in thresholds if x[2] == '<'], key=lambda tup: tup[1])
+
+        if len(threshold_keys) == 0 and 'max_threshold' not in self.rules and 'min_threshold' not in self.rules:
             raise EAException("MetricAggregationRule must have at least one of either max_threshold or min_threshold")
 
         self.metric_key = 'metric_' + self.rules['metric_agg_key'] + '_' + self.rules['metric_agg_type']
@@ -1059,9 +1067,11 @@ class MetricAggregationRule(BaseAggregationRule):
 
         else:
             metric_val = aggregation_data[self.metric_key]['value']
-            if self.crossed_thresholds(metric_val):
+            cnd, tag = self.crossed_thresholds(metric_val)
+            if cnd:
                 match = {self.rules['timestamp_field']: timestamp,
-                         self.metric_key: metric_val}
+                         self.metric_key: metric_val,
+                         self.rules.get('threshold_tag_field') or 'threshold_tag': tag}
                 if query_key is not None:
                     match[self.rules['query_key']] = query_key
                 self.add_match(match)
@@ -1082,9 +1092,11 @@ class MetricAggregationRule(BaseAggregationRule):
 
         else:
             metric_val = aggregation_data[self.metric_key]['value']
-            if self.crossed_thresholds(metric_val):
+            cnd, tag = self.crossed_thresholds(metric_val)
+            if cnd:
                 match_data[self.rules['timestamp_field']] = timestamp
                 match_data[self.metric_key] = metric_val
+                match_data[self.rules.get('threshold_tag_field') or 'threshold_tag'] = tag
 
                 # add compound key to payload to allow alerts to trigger for every unique occurence
                 compound_value = [match_data[key] for key in self.rules['compound_query_key']]
@@ -1094,12 +1106,18 @@ class MetricAggregationRule(BaseAggregationRule):
 
     def crossed_thresholds(self, metric_value):
         if metric_value is None:
-            return False
+            return False, None
         if 'max_threshold' in self.rules and metric_value > self.rules['max_threshold']:
-            return True
+            return True, 'max'
         if 'min_threshold' in self.rules and metric_value < self.rules['min_threshold']:
-            return True
-        return False
+            return True, 'min'
+        for tag, threshold in self.thresholds_above:
+            if int(metric_value) > threshold:
+                return True, tag
+        for tag, threshold in self.thresholds_below:
+            if int(metric_value) < threshold:
+                return True, tag
+        return False, None
 
 
 class SpikeMetricAggregationRule(BaseAggregationRule, SpikeRule):

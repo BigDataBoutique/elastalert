@@ -1160,6 +1160,41 @@ def test_metric_aggregation():
     assert rule.matches[0]['qk'] == 'qk_val'
 
 
+def test_metric_aggregation_custom_thresholds():
+    rules = {'buffer_time': datetime.timedelta(minutes=5),
+             'timestamp_field': '@timestamp',
+             'metric_agg_type': 'avg',
+             'metric_agg_key': 'cpu_pct'}
+
+    # Check threshold logic
+    with pytest.raises(EAException):
+        rule = MetricAggregationRule(rules)
+
+    rules['warning_threshold'] = '>90'
+    rules['critical_threshold'] = '>95'
+    rules['info_threshold'] = '<10'
+    rules['noop_threshold'] = '10'
+
+    rule = MetricAggregationRule(rules)
+
+    assert rule.rules['aggregation_query_element'] == {'metric_cpu_pct_avg': {'avg': {'field': 'cpu_pct'}}}
+
+    assert rule.crossed_thresholds(None) is False, None
+    assert rule.crossed_thresholds(80) is False, None
+    assert rule.crossed_thresholds(91) is True, 'warning'
+    assert rule.crossed_thresholds(95) is True, 'warning'
+    assert rule.crossed_thresholds(96) is True, 'critical'
+    assert rule.crossed_thresholds(5) is False, None
+
+    rule.check_matches(datetime.datetime.now(), None, {'metric_cpu_pct_avg': {'value': None}})
+    rule.check_matches(datetime.datetime.now(), None, {'metric_cpu_pct_avg': {'value': 50}})
+    assert len(rule.matches) == 0
+
+    rule.check_matches(datetime.datetime.now(), None, {'metric_cpu_pct_avg': {'value': 91}})
+    rule.check_matches(datetime.datetime.now(), None, {'metric_cpu_pct_avg': {'value': 96}})
+    assert len(rule.matches) == 2
+
+
 def test_metric_aggregation_complex_query_key():
     rules = {'buffer_time': datetime.timedelta(minutes=5),
              'timestamp_field': '@timestamp',
