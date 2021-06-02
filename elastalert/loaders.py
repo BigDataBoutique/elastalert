@@ -269,6 +269,14 @@ class RulesLoader(object):
 
         # Set defaults, copy defaults from config.yaml
         for key, val in list(self.base_config.items()):
+            if key in rule and isinstance(val, dict):
+                # update value in sub dictionaries
+                rule_config = copy.deepcopy(val)
+                rule_config.update(rule[key])
+                rule[key] = rule_config
+                
+                continue
+
             rule.setdefault(key, val)
         rule.setdefault('name', os.path.splitext(filename)[0])
         rule.setdefault('realert', datetime.timedelta(seconds=0))
@@ -282,7 +290,7 @@ class RulesLoader(object):
         rule.setdefault('_source_enabled', True)
         rule.setdefault('use_local_time', True)
         rule.setdefault('description', "")
-
+        
         # Set timestamp_type conversion function, used when generating queries and processing hits
         rule['timestamp_type'] = rule['timestamp_type'].strip().lower()
         if rule['timestamp_type'] == 'iso':
