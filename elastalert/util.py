@@ -77,6 +77,7 @@ def _find_es_dict_by_key(lookup_dict, term):
     #  {'foo.bar': {'bar': 'ray'}} to look up foo.bar will return {'bar': 'ray'}, not 'ray'
     dict_cursor = lookup_dict
 
+    subkey = ''
     while term:
         split_results = re.split(r'\[(\d)\]', term, maxsplit=1)
         if len(split_results) == 3:
@@ -137,7 +138,7 @@ def lookup_es_key(lookup_dict, term):
     :returns: The value identified by term or None if it cannot be found.
     """
     value_dict, value_key = _find_es_dict_by_key(lookup_dict, term)
-    return None if value_key is None else value_dict[value_key]
+    return None if (value_key is None or value_key not in value_dict) else value_dict[value_key]
 
 
 def ts_to_dt(timestamp):

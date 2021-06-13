@@ -629,7 +629,7 @@ class NewTermsRule(RuleType):
 
     def __init__(self, rule, args=None):
         super(NewTermsRule, self).__init__(rule, args)
-        self.seen_values = {}
+        self.seen_values = dict()
         # Allow the use of query_key or fields
         if 'fields' not in self.rules:
             if 'query_key' not in self.rules:
@@ -652,6 +652,7 @@ class NewTermsRule(RuleType):
                     elastalert_logger.warn('Warning: If query_key is a non-keyword field, you must set '
                                            'use_keyword_postfix to false, or add .keyword/.raw to your query_key.')
         try:
+            self.es = elasticsearch_client(self.rules)
             self.get_all_terms(args)
         except Exception as e:
             # Refuse to start if we cannot get existing terms
@@ -659,7 +660,6 @@ class NewTermsRule(RuleType):
 
     def get_all_terms(self, args):
         """ Performs a terms aggregation for each field to get every existing term. """
-        self.es = elasticsearch_client(self.rules)
         window_size = datetime.timedelta(**self.rules.get('terms_window_size', {'days': 30}))
         field_name = {"field": "", "size": 2147483647}  # Integer.MAX_VALUE
         query_template = {"aggs": {"values": {"terms": field_name}}}
@@ -686,7 +686,7 @@ class NewTermsRule(RuleType):
 
             # For composite keys, we will need to perform sub-aggregations
             if type(field) == list:
-                self.seen_values.setdefault(tuple(field), [])
+                self.seen_values.setdefault(tuple(field), set())
                 level = query_template['aggs']
                 # Iterate on each part of the composite key and add a sub aggs clause to the elastic search query
                 for i, sub_field in enumerate(field):
@@ -699,7 +699,7 @@ class NewTermsRule(RuleType):
                         level['values']['aggs'] = {'values': {'terms': copy.deepcopy(field_name)}}
                         level = level['values']['aggs']
             else:
-                self.seen_values.setdefault(field, [])
+                self.seen_values.setdefault(field, set())
                 # For non-composite keys, only a single agg is needed
                 if self.rules.get('use_keyword_postfix', True):
                     field_name['field'] = add_raw_postfix(field, self.is_five_or_above())
@@ -720,15 +720,15 @@ class NewTermsRule(RuleType):
                         # Make it a tuple since it can be hashed and used in dictionary lookups
                         for bucket in buckets:
                             # We need to walk down the hierarchy and obtain the value at each level
-                            self.seen_values[tuple(field)] += self.flatten_aggregation_hierarchy(bucket)
+                            self.seen_values[tuple(field)] = self.seen_values[tuple(field)].union(self.flatten_aggregation_hierarchy(bucket))
                     else:
-                        keys = [bucket['key'] for bucket in buckets]
-                        self.seen_values[field] += keys
+                        keys = set([bucket['key'] for bucket in buckets])
+                        self.seen_values[field] = self.seen_values[field].union(keys)
                 else:
                     if type(field) == list:
-                        self.seen_values.setdefault(tuple(field), [])
+                        self.seen_values.setdefault(tuple(field), set())
                     else:
-                        self.seen_values.setdefault(field, [])
+                        self.seen_values.setdefault(field, set())
                 if tmp_start == tmp_end:
                     break
                 tmp_start = tmp_end
@@ -749,7 +749,7 @@ class NewTermsRule(RuleType):
                     else:
                         elastalert_logger.info('Found no values for %s' % (field))
                     continue
-                self.seen_values[key] = list(set(values))
+                self.seen_values[key] = set(values)
                 elastalert_logger.info('Found %s unique values for %s' % (len(set(values)), key))
 
     def flatten_aggregation_hierarchy(self, root, hierarchy_tuple=()):
@@ -853,7 +853,7 @@ class NewTermsRule(RuleType):
                     results += self.flatten_aggregation_hierarchy(node, hierarchy_tuple)
                 else:
                     results.append(hierarchy_tuple + (node['key'],))
-        return results
+        return set(results)
 
     def add_data(self, data):
         for document in data:
@@ -872,27 +872,25 @@ class NewTermsRule(RuleType):
                         value += (lookup_result,)
                 else:
                     value = lookup_es_key(document, field)
-                if not value and self.rules.get('alert_on_missing_field'):
+                if value == () and 'alert_on_missing_field' in self.rules and self.rules.get('alert_on_missing_field'):
                     document['missing_field'] = lookup_field
                     self.add_match(copy.deepcopy(document))
-                elif value:
-                    if value not in self.seen_values[lookup_field]:
-                        document['new_field'] = lookup_field
-                        self.add_match(copy.deepcopy(document))
-                        self.seen_values[lookup_field].append(value)
+                elif value != () and value not in self.seen_values[lookup_field]:
+                    document['new_field'] = lookup_field
+                    self.seen_values[lookup_field].add(value)
+                    self.add_match(copy.deepcopy(document))
 
     def add_terms_data(self, terms):
         # With terms query, len(self.fields) is always 1 and the 0'th entry is always a string
         field = self.fields[0]
         for timestamp, buckets in terms.items():
             for bucket in buckets:
-                if bucket['doc_count']:
-                    if bucket['key'] not in self.seen_values[field]:
-                        match = {field: bucket['key'],
-                                 self.rules['timestamp_field']: timestamp,
-                                 'new_field': field}
-                        self.add_match(match)
-                        self.seen_values[field].append(bucket['key'])
+                if bucket['doc_count'] and bucket['key'] not in self.seen_values[field]:
+                    self.seen_values[field].add(bucket['key'])
+                    match = {field: bucket['key'],
+                             self.rules['timestamp_field']: timestamp,
+                             'new_field': field}
+                    self.add_match(match)
 
     def is_five_or_above(self):
         version = self.es.info()['version']['number']
