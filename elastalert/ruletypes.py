@@ -5,7 +5,6 @@ import sys
 
 from blist import sortedlist
 
-from .util import add_raw_postfix
 from .util import dt_to_ts
 from .util import EAException
 from .util import elastalert_logger
@@ -647,10 +646,6 @@ class NewTermsRule(RuleType):
         if self.rules.get('use_terms_query'):
             if [self.rules['query_key']] != self.fields:
                 raise EAException('If use_terms_query is specified, you cannot specify different query_key and fields')
-            if not self.rules.get('query_key').endswith('.keyword') and not self.rules.get('query_key').endswith('.raw'):
-                if self.rules.get('use_keyword_postfix', True):
-                    elastalert_logger.warn('Warning: If query_key is a non-keyword field, you must set '
-                                           'use_keyword_postfix to false, or add .keyword/.raw to your query_key.')
         try:
             self.es = elasticsearch_client(self.rules)
             self.get_all_terms(args)
@@ -690,21 +685,14 @@ class NewTermsRule(RuleType):
                 level = query_template['aggs']
                 # Iterate on each part of the composite key and add a sub aggs clause to the elastic search query
                 for i, sub_field in enumerate(field):
-                    if self.rules.get('use_keyword_postfix', True):
-                        level['values']['terms']['field'] = add_raw_postfix(sub_field, self.is_five_or_above())
-                    else:
-                        level['values']['terms']['field'] = sub_field
+                    level['values']['terms']['field'] = sub_field
                     if i < len(field) - 1:
                         # If we have more fields after the current one, then set up the next nested structure
                         level['values']['aggs'] = {'values': {'terms': copy.deepcopy(field_name)}}
                         level = level['values']['aggs']
             else:
                 self.seen_values.setdefault(field, set())
-                # For non-composite keys, only a single agg is needed
-                if self.rules.get('use_keyword_postfix', True):
-                    field_name['field'] = add_raw_postfix(field, self.is_five_or_above())
-                else:
-                    field_name['field'] = field
+                field_name['field'] = field
 
             # Query the entire time range in small chunks
             while tmp_start < end:
@@ -715,7 +703,7 @@ class NewTermsRule(RuleType):
                 res = self.es.search(body=query, index=index, ignore_unavailable=True, timeout='50s')
                 if 'aggregations' in res:
                     buckets = res['aggregations']['filtered']['values']['buckets']
-                    if type(field) == list:
+                    if type(field) == set:
                         # For composite keys, make the lookup based on all fields
                         # Make it a tuple since it can be hashed and used in dictionary lookups
                         for bucket in buckets:
@@ -747,7 +735,7 @@ class NewTermsRule(RuleType):
                             'no baseline data OR that a non-primitive field was used in a composite key.'
                         ))
                     else:
-                        elastalert_logger.info('Found no values for %s' % (field))
+                        elastalert_logger.info('Found no values for %s' % (field,))
                     continue
                 self.seen_values[key] = set(values)
                 elastalert_logger.info('Found %s unique values for %s' % (len(set(values)), key))
