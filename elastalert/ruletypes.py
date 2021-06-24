@@ -1035,8 +1035,8 @@ class MetricAggregationRule(BaseAggregationRule):
                           if (x.endswith('_threshold') and x not in ['min_threshold','max_threshold'])
                           ]
         thresholds = [(x[:-10], self.rules.get(x)[1:], self.rules.get(x)[:1]) for x in threshold_keys]
-        self.thresholds_above = sorted([(x[0], int(x[1]),) for x in thresholds if x[2] == '>'], key=lambda tup: tup[1])
-        self.thresholds_below = sorted([(x[0], int(x[1]),) for x in thresholds if x[2] == '<'], key=lambda tup: tup[1])
+        self.thresholds_above = sorted([(x[0], float(x[1]),) for x in thresholds if x[2] == '>'], key=lambda tup: tup[1])
+        self.thresholds_below = sorted([(x[0], float(x[1]),) for x in thresholds if x[2] == '<'], key=lambda tup: tup[1])
 
         if len(threshold_keys) == 0 and 'max_threshold' not in self.rules and 'min_threshold' not in self.rules:
             raise EAException("MetricAggregationRule must have at least one of either max_threshold or min_threshold")
@@ -1112,10 +1112,10 @@ class MetricAggregationRule(BaseAggregationRule):
         if 'min_threshold' in self.rules and metric_value < self.rules['min_threshold']:
             return True, 'min'
         for tag, threshold in self.thresholds_above:
-            if int(metric_value) > threshold:
+            if float(metric_value) > threshold:
                 return True, tag
         for tag, threshold in self.thresholds_below:
-            if int(metric_value) < threshold:
+            if float(metric_value) < threshold:
                 return True, tag
         return False, None
 
