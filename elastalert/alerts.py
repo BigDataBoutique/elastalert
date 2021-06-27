@@ -1969,8 +1969,8 @@ class HTTPPostAlerter(Alerter):
             payload = match if self.post_all_values else {}
             for post_key, es_key in list(self.post_payload.items()):
                 payload[post_key] = lookup_es_key(match, es_key)
-            payload["alert_subject"] = alert_subject
-            payload["alert_text"] = str(BasicMatchString(self.rule, match))
+            payload["alert_subject"] = alert_subject.strip()
+            payload["alert_text"] = str(BasicMatchString(self.rule, match)).strip()
             payload.update({k: v for k, v in self.post_static_payload.items() if k not in payload})
             headers = {
                 "Content-Type": "application/json",
