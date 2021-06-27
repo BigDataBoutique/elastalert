@@ -1964,8 +1964,9 @@ class HTTPPostAlerter(Alerter):
         """ Each match will trigger a POST to the specified endpoint(s). """
         alert_subject = self.create_custom_title(matches)
         for match in matches:
-            payload = match if self.post_all_values else {}
-            payload.update(self.post_static_payload)
+            payload = dict(self.post_static_payload)
+            if self.post_all_values:
+                payload.update(match)
             payload["alert_subject"] = alert_subject
             payload["alert_text"] = str(BasicMatchString(self.rule, match))
             for post_key, es_key in list(self.post_payload.items()):
