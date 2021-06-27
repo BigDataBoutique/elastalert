@@ -1558,6 +1558,7 @@ class ElastAlerter(object):
         for alert in rule['alert']:
             alert.pipeline = alert_pipeline
             try:
+                # NOTE: this call mutates the matches while sending the alert
                 alert.alert(matches)
             except EAException as e:
                 self.handle_error('Error while running alert %s: %s' % (alert.get_info()['type'], e), {'rule': rule['name']})
