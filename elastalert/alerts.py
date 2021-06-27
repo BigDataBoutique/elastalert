@@ -77,6 +77,7 @@ class BasicMatchString(object):
                         alert_text_values[i] = alert_value
 
             alert_text_values = [missing if val is None else val for val in alert_text_values]
+            alert_text_values = ["{:.1f}".format(val) if type(val) is float else val for val in alert_text_values]
             alert_text = alert_text.format(*alert_text_values)
         elif 'alert_text_kw' in self.rule:
             kw = {}
@@ -242,6 +243,7 @@ class Alerter(object):
 
             missing = self.rule.get('alert_missing_value', '<MISSING VALUE>')
             alert_subject_values = [missing if val is None else val for val in alert_subject_values]
+            alert_subject_values = ["{:.1f}".format(val) if type(val) is float else val for val in alert_subject_values]
             alert_subject = alert_subject.format(*alert_subject_values)
 
         if len(alert_subject) > alert_subject_max_len:
