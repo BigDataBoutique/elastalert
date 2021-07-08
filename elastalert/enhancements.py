@@ -47,3 +47,8 @@ class CopyFullRuleEnhancement(BaseEnhancement):
 class CopyRuleTypeEnhancement(BaseEnhancement):
     def process(self, match):
         match["rule_type"] = type(self.rule["type"]).__name__
+
+
+class CopyRuleNameEnhancement(BaseEnhancement):
+    def process(self, match):
+        match["rule_name"] = self.rule["name"]
