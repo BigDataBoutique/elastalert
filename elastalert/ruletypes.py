@@ -244,6 +244,7 @@ class FrequencyRule(RuleType):
         else:
             qk = None
 
+        key = None
         for event in data:
             if qk:
                 key = hashable(lookup_es_key(event, qk))
