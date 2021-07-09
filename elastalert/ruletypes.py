@@ -58,7 +58,7 @@ class RuleType(object):
         if ts in event:
             event[ts] = dt_to_ts(event[ts])
 
-        if self.rules.get('compound_query_key'):
+        if self.rules.get('compound_query_key') and '_source' in event:
             event.update({key: lookup_es_key(event['_source'], key) for key in self.rules['compound_query_key']})
 
         self.matches.append(copy.deepcopy(event))
