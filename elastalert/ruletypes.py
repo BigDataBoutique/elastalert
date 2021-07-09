@@ -1262,11 +1262,9 @@ class PercentageMatchRule(BaseAggregationRule):
         return False
 
 
-
-
 class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
     """ A rule that matches when there is a spike in an aggregated event compared to its reference point """
-    required_options = frozenset(['metric_agg_key', 'metric_agg_type', 'spike_height', 'spike_type'])
+    required_options = frozenset(['metric_agg_key', 'metric_agg_type', 'spike_height', 'spike_type', 'pipeline_agg_type'])
     allowed_aggregations = frozenset(['min', 'max', 'avg', 'sum', 'cardinality', 'value_count'])
     allowed_pipeline_aggregations = frozenset(['derivative'])
 
@@ -1274,7 +1272,7 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
         # We inherit everything from BaseAggregation and Spike, overwrite only what we need in functions below
         super(SpikePipelineAggregationRule, self).__init__(*args)
 
-        if len(self.rules['query_key'])!=1:
+        if 'compound_query_key' in self.rules and len(self.rules['compound_query_key'])>1:
             raise NotImplementedError("Only single query keys currently supported")
 
         # MetricAgg alert things
@@ -1289,7 +1287,6 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
             raise EAException("pipeline_agg_type must be one of %s" % (str(self.allowed_pipeline_aggregations)))
 
         self.rules['aggregation_query_element'] = self.generate_aggregation_query()
-
 
     def generate_aggregation_query(self):
         """Lifted from MetricAggregationRule, added support for scripted fields"""
