@@ -541,6 +541,10 @@ class ElastAlerter(object):
         return {endtime: buckets}
 
     def get_hits_aggregation(self, rule, starttime, endtime, index, query_key, term_size=None):
+
+        if "pipeline_agg_type" in rule['type'].rules:
+            starttime = starttime - rule['type'].rules['bucket_interval_timedelta']*2
+
         rule_filter = copy.copy(rule['filter'])
         base_query = self.get_query(
             rule_filter,

@@ -1259,3 +1259,106 @@ class PercentageMatchRule(BaseAggregationRule):
         if 'min_percentage' in self.rules and match_percentage < self.rules['min_percentage']:
             return True
         return False
+
+
+
+
+class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
+    """ A rule that matches when there is a spike in an aggregated event compared to its reference point """
+    required_options = frozenset(['metric_agg_key', 'metric_agg_type', 'spike_height', 'spike_type'])
+    allowed_aggregations = frozenset(['min', 'max', 'avg', 'sum', 'cardinality', 'value_count'])
+    allowed_pipeline_aggregations = frozenset(['derivative'])
+
+    def __init__(self, *args):
+        # We inherit everything from BaseAggregation and Spike, overwrite only what we need in functions below
+        super(SpikePipelineAggregationRule, self).__init__(*args)
+
+        # MetricAgg alert things
+        from uuid import uuid4 as uuid
+        self.uuid = uuid().hex
+        self.metric_key = 'metric_' + self.uuid + '_' + self.rules['metric_agg_type']
+        if not self.rules['metric_agg_type'] in self.allowed_aggregations:
+            raise EAException("metric_agg_type must be one of %s" % (str(self.allowed_aggregations)))
+
+        # PipelineAgg alert things
+        self.pipeline_key = f"{self.metric_key}_{self.rules['pipeline_agg_type']}"
+        if not self.rules['pipeline_agg_type'] in self.allowed_pipeline_aggregations:
+            raise EAException("pipeline_agg_type must be one of %s" % (str(self.allowed_pipeline_aggregations)))
+
+        # Disabling bucket intervals (doesn't make sense in context of spike to split up your time period)
+        # if self.rules.get('bucket_interval'):
+        #     raise EAException("bucket intervals are not supported for spike pipeline aggregation alerts")
+
+        self.rules['aggregation_query_element'] = self.generate_aggregation_query()
+
+    def generate_aggregation_query(self):
+        """Lifted from MetricAggregationRule, added support for scripted fields"""
+        if self.rules.get('metric_agg_script'):
+            return {
+                self.metric_key: {self.rules['metric_agg_type']: self.rules['metric_agg_script']},
+                self.pipeline_key: {self.rules['pipeline_agg_type']: {"buckets_path": self.metric_key}}
+                }
+        return {
+            self.metric_key: {self.rules['metric_agg_type']: {'field': self.rules['metric_agg_key']}},
+            self.pipeline_key: {self.rules['pipeline_agg_type']: {"buckets_path": self.metric_key}}
+            }
+
+    def add_aggregation_data(self, payload):
+        """
+        BaseAggregationRule.add_aggregation_data unpacks our results and runs checks directly against hardcoded cutoffs.
+        We instead want to use all of our SpikeRule.handle_event inherited logic (current/reference) from
+        the aggregation's "value" key to determine spikes from aggregations
+        """
+        for timestamp, payload_data in payload.items():
+            if 'bucket_aggs' in payload_data:
+                self.unwrap_term_buckets(timestamp, payload_data['bucket_aggs'])
+            else:
+                raise NotImplementedError("This should be unreachable based on requiring query_key in schema.yml")
+                # # no time / term split, just focus on the agg
+                # event = {self.ts_field: timestamp}
+                # agg_value = payload_data[self.metric_key]['value']
+                # self.handle_event(event, agg_value, 'all')
+        return
+
+    def unwrap_term_buckets(self, timestamp, term_buckets, qk=[]):
+        """
+        create separate spike event trackers for each term,
+        handle compound query keys
+        """
+        for term_data in term_buckets['buckets']:
+            qk.append(term_data['key'])
+
+            # handle compound query keys (nested aggregations)
+            if term_data.get('bucket_aggs'):
+                self.unwrap_term_buckets(timestamp, term_data['bucket_aggs'], qk)
+                # reset the query key to consider the proper depth for N > 2
+                del qk[-1]
+                continue
+
+            qk_str = ','.join(qk)
+            interval_data = term_data['interval_aggs']['buckets']
+            assert len(interval_data)>1, f"something bad happened, got len {len(interval_data)}"
+            # only interested in final interval bucket 
+            *_, interval_data = interval_data 
+            agg_value = interval_data[self.pipeline_key]['value']
+            event = {self.ts_field: timestamp,
+                     self.rules['query_key']: qk_str}
+            # pass to SpikeRule's tracker
+            self.handle_event(event, agg_value, qk_str)
+
+            # handle unpack of lowest level
+            del qk[-1]
+        return
+
+    def get_match_str(self, match):
+        """
+        Overwrite SpikeRule's message to relate to the aggregation type & field instead of count
+        """
+        message = 'An abnormal {0} of {1} ({2}) occurred around {3}.\n'.format(
+            self.rules['metric_agg_type'], self.rules['metric_agg_key'], round(match['spike_count'], 2),
+            pretty_ts(match[self.rules['timestamp_field']], self.rules.get('use_local_time'))
+        )
+        message += 'Preceding that time, there was a {0} of {1} of ({2}) within {3}\n\n'.format(
+            self.rules['metric_agg_type'], self.rules['metric_agg_key'],
+            round(match['reference_count'], 2), self.rules['timeframe'])
+        return message
