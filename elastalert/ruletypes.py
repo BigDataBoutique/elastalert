@@ -3,6 +3,7 @@ import copy
 import datetime
 import sys
 
+from uuid import uuid4 as uuid
 from blist import sortedlist
 
 from .util import dt_to_ts
@@ -1273,8 +1274,10 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
         # We inherit everything from BaseAggregation and Spike, overwrite only what we need in functions below
         super(SpikePipelineAggregationRule, self).__init__(*args)
 
+        if len(self.rules['query_key'])!=1:
+            raise NotImplementedError("Only single query keys currently supported")
+
         # MetricAgg alert things
-        from uuid import uuid4 as uuid
         self.uuid = uuid().hex
         self.metric_key = 'metric_' + self.uuid + '_' + self.rules['metric_agg_type']
         if not self.rules['metric_agg_type'] in self.allowed_aggregations:
@@ -1285,11 +1288,8 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
         if not self.rules['pipeline_agg_type'] in self.allowed_pipeline_aggregations:
             raise EAException("pipeline_agg_type must be one of %s" % (str(self.allowed_pipeline_aggregations)))
 
-        # Disabling bucket intervals (doesn't make sense in context of spike to split up your time period)
-        # if self.rules.get('bucket_interval'):
-        #     raise EAException("bucket intervals are not supported for spike pipeline aggregation alerts")
-
         self.rules['aggregation_query_element'] = self.generate_aggregation_query()
+
 
     def generate_aggregation_query(self):
         """Lifted from MetricAggregationRule, added support for scripted fields"""
@@ -1354,11 +1354,21 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
         """
         Overwrite SpikeRule's message to relate to the aggregation type & field instead of count
         """
-        message = 'An abnormal {0} of {1} ({2}) occurred around {3}.\n'.format(
-            self.rules['metric_agg_type'], self.rules['metric_agg_key'], round(match['spike_count'], 2),
-            pretty_ts(match[self.rules['timestamp_field']], self.rules.get('use_local_time'))
+
+        message = 'An abnormal {0} of {1} of {2} ({3}) occurred around {4}.\n'.format(
+            self.rules['pipeline_agg_type'], 
+            self.rules['metric_agg_type'], 
+            self.rules['metric_agg_key'],
+            round(match['spike_count'], 2), 
+            pretty_ts(match[self.rules['timestamp_field']],
+            self.rules.get('use_local_time'))
         )
-        message += 'Preceding that time, there was a {0} of {1} of ({2}) within {3}\n\n'.format(
-            self.rules['metric_agg_type'], self.rules['metric_agg_key'],
-            round(match['reference_count'], 2), self.rules['timeframe'])
+
+        message += 'Preceding that time, there was a {0} of {1} of {2} of ({3}) within {4}\n\n'.format(
+            self.rules['pipeline_agg_type'], 
+            self.rules['metric_agg_type'],
+            self.rules['metric_agg_key'],
+            round(match['reference_count'], 2),
+            self.rules['timeframe']
+        )
         return message
