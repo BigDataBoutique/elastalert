@@ -64,7 +64,7 @@ class RuleType(object):
         # this is only relevant when we have a "key" field, which is Elastalert's
         # way to provide information when lacking document data
         if query_key is not None and event_key is not None:
-            split_query_key = [x.strip() for x in query_key.split(',')]
+            split_query_key = self.rules.get('compound_query_key') if 'compound_query_key' in self.rules else [self.rules.get('query_key')]
             split_key = [x.strip() for x in event_key.split(',')]
             for i in range(0, len(split_query_key)):
                 event.update({split_query_key[i]:split_key[i]})
