@@ -255,7 +255,8 @@ class ElastAlerter(object):
                 'interval_aggs': {
                     'date_histogram': {
                         'field': timestamp_field,
-                        'interval': bucket_interval_period},
+                        'interval': bucket_interval_period
+                    },
                     'aggs': metric_agg_element
                 }
             }
@@ -542,10 +543,8 @@ class ElastAlerter(object):
 
     def get_hits_aggregation(self, rule, starttime, endtime, index, query_key, term_size=None):
 
-        if "pipeline_agg_type" in rule['type'].rules:
-            starttime = starttime - rule['type'].rules.get('bucket_interval_timedelta', 1)*2
-
         rule_filter = copy.copy(rule['filter'])
+        
         base_query = self.get_query(
             rule_filter,
             starttime,
@@ -555,9 +554,11 @@ class ElastAlerter(object):
             to_ts_func=rule['dt_to_ts'],
             five=rule['five'], must_not=rule['must_not'],
         )
+        
         if term_size is None:
             term_size = rule.get('terms_size', 50)
         query = self.get_aggregation_query(base_query, rule, query_key, term_size, rule['timestamp_field'])
+        
         try:
             if not rule['five']:
                 res = self.thread_data.current_es.deprecated_search(
@@ -575,6 +576,7 @@ class ElastAlerter(object):
                 e = str(e)[:1024] + '... (%d characters removed)' % (len(str(e)) - 1024)
             self.handle_error('Error running query: %s' % (e), {'rule': rule['name']})
             return None
+
         if 'aggregations' not in res:
             return {}
         if not rule['five']:

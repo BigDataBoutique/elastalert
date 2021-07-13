@@ -2,7 +2,9 @@
 import copy
 import datetime
 import sys
+from time import time
 
+import dateutil
 from uuid import uuid4 as uuid
 from blist import sortedlist
 
@@ -1272,9 +1274,6 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
         # We inherit everything from BaseAggregation and Spike, overwrite only what we need in functions below
         super(SpikePipelineAggregationRule, self).__init__(*args)
 
-        if 'compound_query_key' in self.rules and len(self.rules['compound_query_key'])>1:
-            raise NotImplementedError("Only single query keys currently supported")
-
         # MetricAgg alert things
         self.uuid = uuid().hex
         self.metric_key = 'metric_' + self.uuid + '_' + self.rules['metric_agg_type']
@@ -1286,6 +1285,11 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
         if not self.rules['pipeline_agg_type'] in self.allowed_pipeline_aggregations:
             raise EAException("pipeline_agg_type must be one of %s" % (str(self.allowed_pipeline_aggregations)))
 
+        assert total_seconds(self.rules['run_every']) <= total_seconds(self.rules['bucket_interval_timedelta']), \
+                'rules requires bucket_interval <= run_every'
+        
+        assert total_seconds(self.rules['buffer_time']) >= total_seconds(self.rules['bucket_interval_timedelta']*2), \
+                'buffer_time must be at least twice the bucket_interval'
         self.rules['aggregation_query_element'] = self.generate_aggregation_query()
 
     def generate_aggregation_query(self):
@@ -1310,11 +1314,11 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
             if 'bucket_aggs' in payload_data:
                 self.unwrap_term_buckets(timestamp, payload_data['bucket_aggs'])
             else:
-                raise NotImplementedError("This should be unreachable based on requiring query_key in schema.yml")
-                # # no time / term split, just focus on the agg
-                # event = {self.ts_field: timestamp}
-                # agg_value = payload_data[self.metric_key]['value']
-                # self.handle_event(event, agg_value, 'all')
+                event = {self.ts_field: timestamp}
+                agg_value = self.get_agg_value(payload_data, timestamp)
+                if agg_value is None:
+                    continue
+                self.handle_event(event, agg_value, 'all')
         return
 
     def unwrap_term_buckets(self, timestamp, term_buckets, qk=[]):
@@ -1333,11 +1337,10 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
                 continue
 
             qk_str = ','.join(qk)
-            interval_data = term_data['interval_aggs']['buckets']
-            assert len(interval_data)>1, f"something bad happened, got len {len(interval_data)}"
-            # only interested in final interval bucket 
-            *_, interval_data = interval_data 
-            agg_value = interval_data[self.pipeline_key]['value']
+            
+            agg_value = self.get_agg_value(term_data, timestamp)
+            if agg_value is None:
+                continue
             event = {self.ts_field: timestamp,
                      self.rules['query_key']: qk_str}
             # pass to SpikeRule's tracker
@@ -1346,6 +1349,24 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
             # handle unpack of lowest level
             del qk[-1]
         return
+
+    def get_agg_value(self, data, timestamp):
+        interval_data = data['interval_aggs']['buckets']
+            
+        if not interval_data:
+            # no data in any buckets
+            return
+        
+        # fetch final bucket
+        *_, interval_data = interval_data 
+        interval_time_stamp = dateutil.parser.parse(interval_data['key_as_string'])
+        
+        if (timestamp-interval_time_stamp)>self.rules['bucket_interval_timedelta']:
+            # final bucket doesn't correspond to the most recent bucket
+            # i.e no data in final bucket
+            return
+
+        return interval_data[self.pipeline_key]['value']
 
     def get_match_str(self, match):
         """
