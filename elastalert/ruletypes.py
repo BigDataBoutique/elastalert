@@ -1285,8 +1285,8 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
         if not self.rules['pipeline_agg_type'] in self.allowed_pipeline_aggregations:
             raise EAException("pipeline_agg_type must be one of %s" % (str(self.allowed_pipeline_aggregations)))
 
-        assert total_seconds(self.rules['run_every']) == total_seconds(self.rules['bucket_interval_timedelta']), \
-                'bucket_interval must be exactly the same as run_every'
+        assert total_seconds(self.rules['run_every']) <= total_seconds(self.rules['bucket_interval_timedelta']), \
+                'rules requires bucket_interval <= run_every'
         
         assert total_seconds(self.rules['buffer_time']) >= total_seconds(self.rules['bucket_interval_timedelta']*2), \
                 'buffer_time must be at least twice the bucket_interval'
@@ -1363,7 +1363,7 @@ class SpikePipelineAggregationRule(BaseAggregationRule, SpikeRule):
         
         if (timestamp-interval_time_stamp)>self.rules['bucket_interval_timedelta']:
             # final bucket doesn't correspond to the most recent bucket
-            # i.e not data in final bucket
+            # i.e no data in final bucket
             return
 
         return interval_data[self.pipeline_key]['value']
