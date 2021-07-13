@@ -60,9 +60,16 @@ class RuleType(object):
         if ts in event:
             event[ts] = dt_to_ts(event[ts])
 
-        if self.rules.get('compound_query_key') and '_source' in event:
-            event.update({key: lookup_es_key(event['_source'], key) for key in self.rules['compound_query_key']})
-
+        query_key = self.rules.get('query_key')
+        event_key = event.get('key')
+        # make sure events have the query_key values in the query_key fields
+        # this is only relevant when we have a "key" field, which is Elastalert's
+        # way to provide information when lacking document data
+        if query_key is not None and event_key is not None:
+            split_query_key = self.rules.get('compound_query_key') if 'compound_query_key' in self.rules else [self.rules.get('query_key')]
+            split_key = [x.strip() for x in event_key.split(',')]
+            for i in range(0, len(split_query_key)):
+                event.update({split_query_key[i]:split_key[i]})
         self.matches.append(copy.deepcopy(event))
 
     def get_match_str(self, match):
@@ -589,11 +596,7 @@ class FlatlineRule(FrequencyRule):
         if count < self.rules['threshold']:
             # Do a deep-copy, otherwise we lose the datetime type in the timestamp field of the last event
             event = copy.deepcopy(self.occurrences[key].data[-1][0])
-            query_key = self.rules.get('query_key')
-            if query_key is not None:
-                event[query_key] = key
             event.update(key=key, count=count)
-
             self.add_match(event)
 
             if not self.rules.get('forget_keys'):
