@@ -2,6 +2,7 @@
 import copy
 import datetime
 import os
+import yaml
 
 import mock
 import pytest
@@ -344,7 +345,70 @@ def test_raises_on_missing_config():
                         rules = load_conf(test_args)
                         rules['rules'] = rules['rules_loader'].load(rules)
 
+def test_subconf_update():
+    test_config = """
+es_host: localhost
+es_port: 9002
 
+rules_folder: /etc/elastalert-rules/
+writeback_index: elastalert
+buffer_time:
+  minutes: 1
+run_every:
+  minutes: 1
+alert_time_limit:
+  days: 2
+old_query_limit:
+  minutes: 20
+
+
+http_post_url: "http://localhost:8000/alerts/trigger_new"
+http_post_timeout: 1
+
+http_post_static_payload:
+  apikey: abc123
+  severity: informative
+    """
+    test_rule = """
+# Alert if cluster is in red state
+name: es-cluster-red
+type: any
+index: .monitoring-es-*
+timestamp_field: "timestamp"
+
+timeframe:
+  minutes: 1
+
+realert:
+  minutes: 5
+
+filter:
+  - term:
+      cluster_state.status: red
+
+query_key: cluster_uuid
+
+#alert properties
+alert: post
+http_post_static_payload:
+  severity: critical
+alert_subject: "Cluster {0} status turned RED {1}"
+alert_subject_args:
+- cluster_uuid
+- "@timestamp"
+alert_text: |
+  Cluster {0} status is RED
+alert_text_args: ["cluster_uuid"]
+alert_text_type: alert_text_only
+    """
+    test_config = yaml.safe_load(test_config)
+    test_rule = yaml.safe_load(test_rule)
+    rules_loader = FileRulesLoader(test_config)
+    print(test_rule['http_post_static_payload'])
+    assert test_rule['http_post_static_payload'].get('apikey', None) is None
+    rules_loader.load_options(test_rule, test_config, 'filename.yaml')
+    assert test_rule['http_post_static_payload'].get('apikey', None) == "abc123"
+    
 def test_compound_query_key():
     test_config_copy = copy.deepcopy(test_config)
     rules_loader = FileRulesLoader(test_config_copy)
